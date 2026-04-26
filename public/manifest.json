@@ -3,7 +3,7 @@
   "short_name": "AZ-900",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1a2e",
-  "theme_color": "#1a1a2e",
-  "description": "Microsoft Azure Fundamentals (AZ-900) Practice"
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "description": "Microsoft Azure Fundamentals 対策アプリ"
 }

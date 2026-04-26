@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#0f172a"/>
+  <rect x="24" y="24" width="464" height="464" rx="80" fill="#1e293b" opacity="0.5"/>
+  <!-- Cloud icon -->
+  <path d="M170 280 C170 240, 200 210, 240 210 C245 190, 265 175, 290 175 C320 175, 345 195, 350 220 C370 225, 385 245, 385 268 C385 295, 363 318, 336 318 L200 318 C183 318, 170 305, 170 288 Z" fill="#38bdf8" opacity="0.9"/>
+  <!-- Smile in cloud -->
+  <circle cx="275" cy="260" r="6" fill="#0f172a"/>
+  <path d="M258 278 Q275 295, 292 278" stroke="#0f172a" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <rect x="196" y="345" width="120" height="6" rx="3" fill="#38bdf8" opacity="0.6"/>
+</svg>

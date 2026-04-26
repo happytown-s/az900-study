@@ -1,103 +1,276 @@
-import { useState, useEffect } from 'react';
-import type { TabName, QuizResult } from './types';
-import type { Lang } from './i18n';
-import { t } from './i18n';
-import Quiz from './components/Quiz';
-import Progress from './components/Progress';
+import { useState, useCallback, useMemo } from 'react';
+import type { Question, ExamScore } from './core/types';
+import { allQuestions } from './data/questions';
+import { quizConfig } from './data/config';
+import { useStorage } from './core/useStorage';
+import { pickFromCategories, shuffle } from './utils/helpers';
 
-const LANG_KEY = 'az900-lang';
+import HomePage from './pages/HomePage';
+import DrillSelectPage from './pages/DrillSelectPage';
+import DrillPlayPage from './pages/DrillPlayPage';
+import ExamPage from './pages/ExamPage';
+import ExamPlayPage from './pages/ExamPlayPage';
+import ExamResultPage from './pages/ExamResultPage';
+import ReviewPage from './pages/ReviewPage';
+import TermsPage from './pages/TermsPage';
 
-function loadLang(): Lang {
-  try {
-    const raw = localStorage.getItem(LANG_KEY);
-    if (raw === 'ja') return 'ja';
-  } catch { /* noop */ }
-  return 'en';
-}
 
-const STORAGE_KEY = 'az900-results';
 
-function loadResults(): QuizResult[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveResults(results: QuizResult[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(results));
-}
+type Page =
+  | 'home'
+  | 'drill'
+  | 'drill-play'
+  | 'exam'
+  | 'exam-play'
+  | 'exam-result'
+  | 'review'
+  | 'review-play'
+  | 'terms'
+  | 'terms-drill'
+  
+  ;
 
 export default function App() {
-  const [tab, setTab] = useState<TabName>('quiz');
-  const [results, setResults] = useState<QuizResult[]>(loadResults);
-  const [lang, setLang] = useState<Lang>(loadLang);
+  const [currentPage, setCurrentPage] = useState<Page>('home');
+  const [drillCategory, setDrillCategory] = useState<string | null>(null);
+  const [examQuestions, setExamQuestions] = useState<Question[]>([]);
+  const [examAnswers, setExamAnswers] = useState<Map<number, number>>(new Map());
+  const [examTimeSpent, setExamTimeSpent] = useState(0);
+  const [examStartKey, setExamStartKey] = useState(0);
+  const [reviewQuestionIds, setReviewQuestionIds] = useState<number[]>([]);
+  const [termsQuestionIds, setTermsQuestionIds] = useState<number[]>([]);
 
-  useEffect(() => {
-    saveResults(results);
-  }, [results]);
+  const {
+    answerHistory,
+    examScores,
+    streak,
+    darkMode,
+    recordAnswer,
+    recordExamScore,
+    toggleDarkMode,
+    getWrongQuestions,
+  } = useStorage();
 
-  const addResult = (r: QuizResult) => {
-    setResults(prev => [...prev, r]);
-  };
+  const wrongCount = useMemo(() => {
+    return getWrongQuestions().length;
+  }, [getWrongQuestions]);
 
-  const clearResults = () => {
-    setResults([]);
-    localStorage.removeItem(STORAGE_KEY);
-  };
+  const navigate = useCallback((page: string) => {
+    setCurrentPage(page as Page);
+    window.scrollTo(0, 0);
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem(LANG_KEY, lang);
-  }, [lang]);
+  const drillQuestions = useMemo(() => {
+    if (!drillCategory) return allQuestions;
+    return allQuestions.filter((q) => q.category === drillCategory);
+  }, [drillCategory]);
 
-  const toggleLang = () => {
-    setLang(prev => (prev === 'en' ? 'ja' : 'en'));
-  };
+  const handleSelectCategory = useCallback((catId: string | null) => {
+    setDrillCategory(catId);
+    navigate('drill-play');
+  }, [navigate]);
 
-  const tabs: { key: TabName; label: string }[] = [
-    { key: 'quiz', label: t(lang, 'tab.quiz') },
-    { key: 'exam', label: t(lang, 'tab.exam') },
-    { key: 'progress', label: t(lang, 'tab.progress') },
-  ];
+  const handleStartExam = useCallback(() => {
+    const perCategory = Math.ceil(quizConfig.examQuestions / quizConfig.categories.length);
+    const questions = pickFromCategories(allQuestions, perCategory);
+    setExamQuestions(questions.slice(0, quizConfig.examQuestions));
+    setExamAnswers(new Map());
+    setExamTimeSpent(0);
+    setExamStartKey((k) => k + 1);
+    navigate('exam-play');
+  }, [navigate]);
+
+  const handleExamFinish = useCallback(
+    (answers: Map<number, number>, timeUsed: number) => {
+      setExamAnswers(answers);
+      setExamTimeSpent(timeUsed);
+
+      let correctCount = 0;
+      for (const q of examQuestions) {
+        const userAnswer = answers.get(q.id);
+        if (userAnswer !== undefined && q.options[userAnswer]?.correct) {
+          correctCount++;
+          recordAnswer(q.id, true);
+        } else {
+          recordAnswer(q.id, false);
+        }
+      }
+
+      const score: ExamScore = {
+        totalQuestions: examQuestions.length,
+        correctCount,
+        date: new Date().toISOString(),
+        timeSpent: timeUsed,
+      };
+      recordExamScore(score);
+      navigate('exam-result');
+    },
+    [examQuestions, recordAnswer, recordExamScore, navigate],
+  );
+
+  const handleRetryReview = useCallback((ids: number[]) => {
+    setReviewQuestionIds(ids);
+    navigate('review-play');
+  }, [navigate]);
+
+  const handleTermsDrill = useCallback((ids: number[]) => {
+    setTermsQuestionIds(ids);
+    navigate('terms-drill');
+  }, [navigate]);
+
+  const handleDrillFinish = useCallback(
+    (_results: { correct: number; total: number }) => {},
+    [],
+  );
+
+  const startTime = useMemo(() => Date.now(), [examStartKey]);
+
+  const handleExamSubmit = useCallback(
+    (answers: Map<number, number>) => {
+      const timeUsed = Math.floor((Date.now() - startTime) / 1000);
+      handleExamFinish(answers, timeUsed);
+    },
+    [handleExamFinish, startTime],
+  );
+
+  const handleExamTimeUp = useCallback(
+    (answers: Map<number, number>) => {
+      const timeUsed = quizConfig.examTimeLimit * 60;
+      handleExamFinish(answers, timeUsed);
+    },
+    [handleExamFinish],
+  );
 
   return (
-    <div className="min-h-screen bg-dark-bg text-dark-text">
-      <header className="bg-dark-surface border-b border-dark-border sticky top-0 z-50">
-        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-gold">{t(lang, 'app.title')}</h1>
-            <button
-              onClick={toggleLang}
-              className="px-2 py-0.5 rounded text-xs font-medium bg-dark-card text-dark-muted hover:text-dark-text border border-dark-border transition-colors"
-            >
-              {t(lang, 'lang.toggle')}
-            </button>
-          </div>
-          <nav className="flex gap-1">
-            {tabs.map(t => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                  tab === t.key
-                    ? 'bg-gold text-dark-bg'
-                    : 'text-dark-muted hover:text-dark-text hover:bg-dark-card'
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </header>
+    <div className={darkMode ? 'dark' : ''}>
+      {currentPage === 'home' && (
+        <HomePage
+          onNavigate={navigate}
+          darkMode={darkMode}
+          onToggleDarkMode={toggleDarkMode}
+          answerHistory={answerHistory}
+          examScores={examScores}
+          streak={streak}
+          wrongCount={wrongCount}
+        />
+      )}
 
-      <main className="max-w-4xl mx-auto px-4 py-6">
-        {tab === 'quiz' && <Quiz results={results} addResult={addResult} modeFilter={null} lang={lang} />}
-        {tab === 'exam' && <Quiz results={results} addResult={addResult} modeFilter="exam" lang={lang} />}
-        {tab === 'progress' && <Progress results={results} onClear={clearResults} lang={lang} />}
-      </main>
+      {currentPage === 'drill' && (
+        <DrillSelectPage
+          allQuestions={allQuestions}
+          answerHistory={answerHistory}
+          onSelectCategory={handleSelectCategory}
+          onBack={() => navigate('drill')}
+        />
+      )}
+
+      {currentPage === 'drill-play' && (
+        <DrillPlayPage
+          key={`drill-${drillCategory ?? 'all'}`}
+          questions={drillQuestions}
+          categoryLabel={
+            drillCategory
+              ? (allQuestions.find((q) => q.category === drillCategory)
+                  ?.categoryLabel ?? drillCategory)
+              : '全分野'
+          }
+          passLine={quizConfig.passLine}
+          recordAnswer={recordAnswer}
+          onFinish={handleDrillFinish}
+          onBack={() => navigate('drill')}
+        />
+      )}
+
+      {currentPage === 'exam' && (
+        <ExamPage
+          config={quizConfig}
+          onStart={handleStartExam}
+          onBack={() => navigate('home')}
+        />
+      )}
+
+      {currentPage === 'exam-play' && (
+        <ExamPlayPage
+          key={examStartKey}
+          questions={examQuestions}
+          timeLimit={quizConfig.examTimeLimit}
+          onTimeUp={handleExamTimeUp}
+          onSubmit={handleExamSubmit}
+          onBack={() => navigate('home')}
+        />
+      )}
+
+      {currentPage === 'exam-result' && (
+        <ExamResultPage
+          questions={examQuestions}
+          answers={examAnswers}
+          timeSpent={examTimeSpent}
+          passLine={quizConfig.passLine}
+          onReview={() => {
+            const wrongIds: number[] = [];
+            for (const q of examQuestions) {
+              const userAnswer = examAnswers.get(q.id);
+              if (userAnswer === undefined || !q.options[userAnswer]?.correct) {
+                wrongIds.push(q.id);
+              }
+            }
+            setReviewQuestionIds(wrongIds);
+            navigate('review-play');
+          }}
+          onRetry={handleStartExam}
+          onHome={() => navigate('home')}
+        />
+      )}
+
+      {currentPage === 'review' && (
+        <ReviewPage
+          allQuestions={allQuestions}
+          wrongQuestionIds={getWrongQuestions()}
+          onRetry={handleRetryReview}
+          onBack={() => navigate('home')}
+        />
+      )}
+
+      {currentPage === 'terms' && (
+        <TermsPage
+          onBack={() => navigate('home')}
+          onStartDrill={handleTermsDrill}
+        />
+      )}
+
+      {currentPage === 'terms-drill' && (
+        <DrillPlayPage
+          key={`terms-${termsQuestionIds.join(',')}`}
+          questions={
+            termsQuestionIds.length > 0
+              ? shuffle(
+                  allQuestions.filter((q) => termsQuestionIds.includes(q.id)),
+                )
+              : []
+          }
+          categoryLabel="用語から出題"
+          passLine={quizConfig.passLine}
+          recordAnswer={recordAnswer}
+          onFinish={handleDrillFinish}
+          onBack={() => navigate('terms')}
+        />
+      )}
+
+      {currentPage === 'review-play' && (
+        <DrillPlayPage
+          key={`review-${reviewQuestionIds.join(',')}`}
+          questions={
+            reviewQuestionIds.length > 0
+              ? allQuestions.filter((q) => reviewQuestionIds.includes(q.id))
+              : []
+          }
+          categoryLabel="復習"
+          passLine={quizConfig.passLine}
+          recordAnswer={recordAnswer}
+          onFinish={handleDrillFinish}
+          onBack={() => navigate('review')}
+        />
+      )}
     </div>
   );
 }
